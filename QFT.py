@@ -1,7 +1,6 @@
 
 from qiskit.circuit.library.standard_gates import CPhaseGate, PhaseGate
 
-import quimb
 import quimb as qu
 import quimb.tensor as qtn
 import quimb.tensor.tensor_core as qtc
@@ -10,8 +9,8 @@ import numpy as np
 import math
 
 # Local imports
-import TensorHelpers
-import Index
+from TensorHelpers import *
+from Index import *
     
     
 '''
@@ -310,6 +309,8 @@ class QFT:
         MPO_arrays = [t.data for t in sorted_tensors]
         mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr')
         mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds=True, show_tags=True, figsize=(20, 20))
+
+        return self.tn
         
     def getValidTensorsInRange(self, row_range, col_range):
         '''
@@ -377,7 +378,7 @@ class QFT:
         return indices_in_dir
             
     
-    def zip_up(self, max_bond=-1):
+    def zip_up(self, max_bond=-1, cutoff=1e-15):
         '''
         Performs the zip-up algorithm on the phase gates in our tensor network
         '''
@@ -417,8 +418,9 @@ class QFT:
                 right_val_tensor =  self.getTensorFromTag(right_tags[0])
                 right_tags_to_drop = list(filter(lambda tag: tag not in right_tags, right_val_tensor.tags))
                 right_val_tensor.drop_tags(right_tags_to_drop)
+                self.draw()
                 
-                
+               
             # Contract the row with the center of orthogonality  
             center_ortho_row = end_row
                 
@@ -430,6 +432,7 @@ class QFT:
             # Drop all other tags and add our new tags
             center_ortho_contracted_tensor.drop_tags()
             center_ortho_contracted_tensor.add_tag(tags)
+            self.draw()
             
             # contract the final tensor
             last_row = end_row-1
@@ -440,6 +443,7 @@ class QFT:
             
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(tags)
+            self.draw()
             
 
             # Base case: return if we have a complte MPO
@@ -455,7 +459,6 @@ class QFT:
                 self.draw()
                 return
             
-            self.draw()
             
             # Do zip down
             for row in range(end_row, self.N-1):
@@ -490,6 +493,7 @@ class QFT:
                 right_val_tensor =  self.getTensorFromTag(right_tags[0])
                 right_tags_to_drop = list(filter(lambda tag: tag not in right_tags, right_val_tensor.tags))
                 right_val_tensor.drop_tags(right_tags_to_drop)
+                self.draw()
 
             # Do last contraction operation
             last_row = self.N-1
@@ -498,6 +502,8 @@ class QFT:
             last_tags = [TensorHelpers.getTag(last_row, col+1), f'T[{last_row}]']
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(last_tags)
+            
+            self.draw() 
             
             # Increment our ending row before starting a new column
             end_row += 1
@@ -510,4 +516,4 @@ class QFT:
             for j in np.arange(0, self.N*self.N, 0.5):
                 fix_dict[f'({i:.1f}, {j:.1f})'] = (j, -i)
 
-        self.tn.draw(color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], figsize=(16, 16), show_inds='all', show_tags=True, initial_layout='shell', fix=fix_dict, font_size=10)
+        self.tn.draw(color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], figsize=(16, 16), show_inds=None, show_tags=True, initial_layout='shell', fix=fix_dict, font_size=10)
