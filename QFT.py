@@ -95,6 +95,18 @@ class QFT:
         else:
             return None
         
+    def get_sorted_tensors(self):
+        '''
+        Gets a list of all tensors sorted by row and col
+        '''
+        
+        # MPO_tensors = self.tn.tensors
+        # sorted_tensors = sorted(MPO_tensors, key=lambda t: TensorHelpers.getRowColTagFromTensor(t))
+        sorted_tensors = self.tn.tensors_sorted()
+        for t in sorted_tensors:
+            t.modify(inds=t.inds[::-1])
+        return sorted_tensors
+        
 
     def getIndices(self, tensor_row, tensor_col, bonds=[]):
         '''
@@ -163,6 +175,10 @@ class QFT:
         start_row : int
             the starting row of the phase MPO
         '''
+        
+        # Internal function to get the data for a order 4 phase gate
+        def get_cphase_data(phase):
+            return np.array([qu.identity(2), np.zeros((2,2)), np.zeros((2,2)), qu.phase_gate(phase)]).reshape(2,2,2,2) 
 
         # Define our control (copy tensor) in the form:
         # [ 
@@ -192,7 +208,7 @@ class QFT:
         phase_count = 1
         for i in range(start_row+1, end_row-1):
             phase_denom = (2**(phase_count))
-            phase = np.pi/phase_denom
+            phase = -np.pi/phase_denom
             inds = self.getIndices(i, col, bonds=[
                 (i, col-1), 
                 (i, col+1),
@@ -201,7 +217,7 @@ class QFT:
             ])
 
             self.tn.add(qtn.Tensor(
-                data=CPhaseGate(phase).to_matrix().reshape(2,2,2,2),
+                data=get_cphase_data(phase),
                 inds=inds,
                 tags=['P', f'$\pi$/{phase_denom}', TensorHelpers.getTag(i,col)]))
 
@@ -215,7 +231,7 @@ class QFT:
         #   [0, e^iπ)] 
         # ]
         # (MPO-QFT paper equation 53)
-        last_phase = np.pi/(2**(phase_count))
+        last_phase = -np.pi/(2**(phase_count))
         last_phase_gate_inds = self.getIndices(end_row-1, col, bonds=[
             (end_row-1, col-1), 
             (end_row-1, col+1), 
@@ -223,7 +239,7 @@ class QFT:
         ])
 
         self.tn.add(qtn.Tensor(
-            data=[qu.identity(2), qu.phase_gate(last_phase)],
+            data=np.array([qu.identity(2), qu.phase_gate(last_phase)]).reshape(2,2,2),
             inds=last_phase_gate_inds,
             tags=['P', f'$\pi$/{2**(phase_count)}', TensorHelpers.getTag(end_row-1, col)]))
         
@@ -293,22 +309,26 @@ class QFT:
 
         self.create_circuit()
         self.zip_up(max_bond=max_bond_dim)
+        
+        # Do final global compression
+        self.tn.compress_all(inplace=True, max_bond=max_bond_dim)
         self.draw()
         
         # Get the tensors in the correct order
-        MPO_tensors = self.tn.tensors
-        sorted_tensors = sorted(MPO_tensors, key=lambda t: TensorHelpers.getRowColTagFromTensor(t))
+        sorted_tensors = self.get_sorted_tensors()
         
         # Print out the tensors 
         for t in sorted_tensors:
             print(f"Tensor shape: {t.shape}")
             print(f"Tensor: {t}")
-            print(f"Tensor Data:\n {t.data}", end="\n\n")
-           
+            print(f"Tensor Data:\n {t.data}")
+        
+        
         # Convert the tensors to numpy arrays 
         MPO_arrays = [t.data for t in sorted_tensors]
+        
         mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr')
-        mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds=True, show_tags=True, figsize=(20, 20))
+        mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds='bond-size', show_tags=True, figsize=(20, 20))
 
         return self.tn
         
@@ -391,8 +411,11 @@ class QFT:
             for row in range(self.N-1, end_row, -1):
                 contracted_tensor, contracted_tensor_tag = self.contract_tensors_in_range([row, row+0.5], [col-col_radius, col+col_radius])
                 
+                self.draw() 
+                
                 # Get the indices we're going to SVD on
                 left_inds = [str(index) for index in self.getSVDIndices(contracted_tensor, row, 'up')]
+                right_inds = list(filter(lambda t: t not in left_inds, TensorHelpers.getTensorIndices(contracted_tensor)))
                 
                 absorb = "left"
                 left_tags = [TensorHelpers.getTag(row-0.5, col+1), f'UxS[{row}]']
@@ -401,7 +424,9 @@ class QFT:
                 self.tn.replace_with_svd(
                     [contracted_tensor_tag], 
                     left_inds=left_inds,
-                    eps=0.01,
+                    right_inds=right_inds,
+                    eps=cutoff,
+                    cutoff_mode='rel',
                     max_bond=max_bond,
                     inplace=True,
                     absorb=absorb,
@@ -418,6 +443,7 @@ class QFT:
                 right_val_tensor =  self.getTensorFromTag(right_tags[0])
                 right_tags_to_drop = list(filter(lambda tag: tag not in right_tags, right_val_tensor.tags))
                 right_val_tensor.drop_tags(right_tags_to_drop)
+                
                 self.draw()
                 
                
@@ -443,6 +469,8 @@ class QFT:
             
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(tags)
+            
+            
             self.draw()
             
 
@@ -456,6 +484,49 @@ class QFT:
                     retag_map[t_old_tag] = TensorHelpers.getTag(t_row, 0)
                     
                 self.tn.retag(retag_map, inplace=True)
+                
+                self.draw()
+                
+                # Get the tensors in the correct order
+                sorted_tensors = self.get_sorted_tensors()
+                
+                # Print out the tensors 
+                for t in sorted_tensors:
+                    print(f"Tensor shape: {t.shape}")
+                    print(f"Tensor: {t}")
+                    print(f"Tensor Data:\n {t.data}")
+                
+                # Reindex the index between these two tensors to have a specifc bond name
+                reindex_map = {}
+                sorted_tensors = self.get_sorted_tensors()
+                for i in range(self.N - 1):
+                    shared_inds = TensorHelpers.getSharedIndicesBetween(sorted_tensors[i], sorted_tensors[i+1])
+                    reindex_map[shared_inds[0]] = f'z{i}'
+                    
+                self.tn.reindex(reindex_map, inplace=True)
+                
+                
+                # Reindex the upper and lower indices of the tensors
+                reindex_map = {}
+                for i in range(self.N):
+                    t = sorted_tensors[i]
+                    sorted_inds = sorted(t.inds)
+                    
+                    upper_index = sorted_inds[0]
+                    lower_index = sorted_inds[1]
+                    
+                    reindex_map[upper_index] = f'k{i}'
+                    reindex_map[lower_index] = f'b{i}'
+                    
+                self.tn.reindex(reindex_map, inplace=True)
+                    
+                
+                # Lastly, reorder all tensor indices to be in a correct and organized order
+                for t in sorted_tensors:
+                    sorted_inds = sorted(t.inds)
+                    for i in range(len(sorted_inds)):
+                        t.moveindex(sorted_inds[i], i, inplace=True)
+                        
                 self.draw()
                 return
             
@@ -463,20 +534,22 @@ class QFT:
             # Do zip down
             for row in range(end_row, self.N-1):
                 cur_tensor, cur_tensor_tag = self.contract_tensors_in_range([row-0.5, row], [col-col_radius, col+col_radius])
+                self.draw() 
                 
                 # Get the indices we're going to SVD on
                 right_inds = [str(index) for index in self.getSVDIndices(cur_tensor, row, 'down')]
                 left_inds = list(filter(lambda t: t not in right_inds,TensorHelpers.getTensorIndices(cur_tensor)))
                 
                 absorb = "right"
-                left_tags = [f'U[{row}]', TensorHelpers.getTag(row, col+1)]
                 right_tags = [f'VxS[{row}]', TensorHelpers.getTag(row+0.5, col+1)]
+                left_tags = [f'U[{row}]', TensorHelpers.getTag(row, col+1)]
                 
                 self.tn.replace_with_svd(
                     [cur_tensor_tag], 
                     left_inds=left_inds,
                     right_inds=right_inds,
-                    eps=0.01,
+                    eps=cutoff,
+                    cutoff_mode='rel',
                     max_bond=max_bond,
                     inplace=True,
                     absorb=absorb,
@@ -516,4 +589,4 @@ class QFT:
             for j in np.arange(0, self.N*self.N, 0.5):
                 fix_dict[f'({i:.1f}, {j:.1f})'] = (j, -i)
 
-        self.tn.draw(color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], figsize=(16, 16), show_inds=None, show_tags=True, initial_layout='shell', fix=fix_dict, font_size=10)
+        self.tn.draw(color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], figsize=(16, 16), show_inds='all', show_tags=True, initial_layout='shell', fix=fix_dict, font_size=10)

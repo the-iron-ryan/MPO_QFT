@@ -28,6 +28,17 @@ class TensorHelpers:
             indices.append(i)
         return indices
     
+    @classmethod
+    def getSharedIndicesBetween(cls, tensor1, tensor2):
+        '''
+        Gets the shared indices between two tensors
+        '''
+        tensor1_indices = TensorHelpers.getTensorIndices(tensor1)
+        tensor2_indices = TensorHelpers.getTensorIndices(tensor2)
+        
+        # Return the intersection of the two lists
+        return list(set(tensor1_indices) & set(tensor2_indices))
+    
     @classmethod 
     def getTagRowCol(cls, tag):
         '''
