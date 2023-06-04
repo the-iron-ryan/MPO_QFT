@@ -302,35 +302,46 @@ class QFT:
         # Important: merge all unconnected phase gates after we've built the circuit
         self.merge()
 
-    def create_MPO(self, max_bond_dim=-1):
+    def create_MPO(self, max_bond_dim=-1, cutoff=1e-15, verbose=False):
         '''
         Creates a matrix product operator representing the quantum Fourier transform
+        
+        ----------
+        Parameters
+        
+        max_bond_dim: int
+            The maximum bond dimension to use when zipping up the tensor network
+        
+        Returns
+        mpo: qtn.MatrixProductOperator
+            The matrix product operator representing the quantum Fourier transform
         '''
 
         self.create_circuit()
-        self.zip_up(max_bond=max_bond_dim)
+        self.zip_up(max_bond=max_bond_dim, cutoff=cutoff, verbose=verbose)
         
         # Do final global compression
         self.tn.compress_all(inplace=True, max_bond=max_bond_dim)
-        self.draw()
+        
+        if verbose:
+            self.draw()
         
         # Get the tensors in the correct order
         sorted_tensors = self.get_sorted_tensors()
         
         # Print out the tensors 
-        for t in sorted_tensors:
-            print(f"Tensor shape: {t.shape}")
-            print(f"Tensor: {t}")
-            print(f"Tensor Data:\n {t.data}")
-        
+        if verbose:
+            self.print_tensors()
         
         # Convert the tensors to numpy arrays 
         MPO_arrays = [t.data for t in sorted_tensors]
         
         mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr')
-        mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds='bond-size', show_tags=True, figsize=(20, 20))
 
-        return self.tn
+        if verbose:
+            mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds='bond-size', show_tags=True, figsize=(20, 20))
+
+        return mpo
         
     def getValidTensorsInRange(self, row_range, col_range):
         '''
@@ -398,7 +409,7 @@ class QFT:
         return indices_in_dir
             
     
-    def zip_up(self, max_bond=-1, cutoff=1e-15):
+    def zip_up(self, max_bond=-1, cutoff=1e-15, verbose=False):
         '''
         Performs the zip-up algorithm on the phase gates in our tensor network
         '''
@@ -410,8 +421,9 @@ class QFT:
             # Do zip up
             for row in range(self.N-1, end_row, -1):
                 contracted_tensor, contracted_tensor_tag = self.contract_tensors_in_range([row, row+0.5], [col-col_radius, col+col_radius])
-                
-                self.draw() 
+               
+                if verbose: 
+                    self.draw() 
                 
                 # Get the indices we're going to SVD on
                 left_inds = [str(index) for index in self.getSVDIndices(contracted_tensor, row, 'up')]
@@ -443,8 +455,9 @@ class QFT:
                 right_val_tensor =  self.getTensorFromTag(right_tags[0])
                 right_tags_to_drop = list(filter(lambda tag: tag not in right_tags, right_val_tensor.tags))
                 right_val_tensor.drop_tags(right_tags_to_drop)
-                
-                self.draw()
+               
+                if verbose:
+                    self.draw() 
                 
                
             # Contract the row with the center of orthogonality  
@@ -458,7 +471,9 @@ class QFT:
             # Drop all other tags and add our new tags
             center_ortho_contracted_tensor.drop_tags()
             center_ortho_contracted_tensor.add_tag(tags)
-            self.draw()
+            
+            if verbose:
+                self.draw()
             
             # contract the final tensor
             last_row = end_row-1
@@ -470,8 +485,9 @@ class QFT:
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(tags)
             
-            
-            self.draw()
+           
+            if verbose: 
+                self.draw()
             
 
             # Base case: return if we have a complte MPO
@@ -484,8 +500,9 @@ class QFT:
                     retag_map[t_old_tag] = TensorHelpers.getTag(t_row, 0)
                     
                 self.tn.retag(retag_map, inplace=True)
-                
-                self.draw()
+               
+                if verbose: 
+                    self.draw()
                 
                 # Get the tensors in the correct order
                 sorted_tensors = self.get_sorted_tensors()
@@ -526,15 +543,18 @@ class QFT:
                     sorted_inds = sorted(t.inds)
                     for i in range(len(sorted_inds)):
                         t.moveindex(sorted_inds[i], i, inplace=True)
-                        
-                self.draw()
+                       
+                if verbose: 
+                    self.draw()
                 return
             
             
             # Do zip down
             for row in range(end_row, self.N-1):
                 cur_tensor, cur_tensor_tag = self.contract_tensors_in_range([row-0.5, row], [col-col_radius, col+col_radius])
-                self.draw() 
+                
+                if verbose:
+                    self.draw()
                 
                 # Get the indices we're going to SVD on
                 right_inds = [str(index) for index in self.getSVDIndices(cur_tensor, row, 'down')]
@@ -566,7 +586,9 @@ class QFT:
                 right_val_tensor =  self.getTensorFromTag(right_tags[0])
                 right_tags_to_drop = list(filter(lambda tag: tag not in right_tags, right_val_tensor.tags))
                 right_val_tensor.drop_tags(right_tags_to_drop)
-                self.draw()
+                
+                if verbose:
+                    self.draw()
 
             # Do last contraction operation
             last_row = self.N-1
@@ -575,8 +597,9 @@ class QFT:
             last_tags = [TensorHelpers.getTag(last_row, col+1), f'T[{last_row}]']
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(last_tags)
-            
-            self.draw() 
+           
+            if verbose: 
+                self.draw() 
             
             # Increment our ending row before starting a new column
             end_row += 1
@@ -590,3 +613,13 @@ class QFT:
                 fix_dict[f'({i:.1f}, {j:.1f})'] = (j, -i)
 
         self.tn.draw(color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], figsize=(16, 16), show_inds='all', show_tags=True, initial_layout='shell', fix=fix_dict, font_size=10)
+
+    def print_tensors(self):
+        '''
+        Helper function to print out the tensors in the correct order
+        '''
+        sorted_tensors = self.get_sorted_tensors()
+        for tensor in sorted_tensors:
+            print(f"Tensor shape: {tensor.shape}")
+            print(f"Tensor: {tensor}")
+            print(f"Tensor Data:\n {tensor.data}", end='\n\n')
