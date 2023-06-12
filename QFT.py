@@ -231,7 +231,8 @@ class QFT:
         #   [0, e^iπ)] 
         # ]
         # (MPO-QFT paper equation 53)
-        last_phase = -np.pi/(2**(phase_count))
+        last_phase_denom = (2**(phase_count))
+        last_phase = -np.pi/last_phase_denom
         last_phase_gate_inds = self.getIndices(end_row-1, col, bonds=[
             (end_row-1, col-1), 
             (end_row-1, col+1), 
@@ -241,7 +242,7 @@ class QFT:
         self.tn.add(qtn.Tensor(
             data=np.array([qu.identity(2), qu.phase_gate(last_phase)]).reshape(2,2,2),
             inds=last_phase_gate_inds,
-            tags=['P', f'$\pi$/{2**(phase_count)}', TensorHelpers.getTag(end_row-1, col)]))
+            tags=['P', f'$\pi$/{last_phase_denom}', TensorHelpers.getTag(end_row-1, col)]))
         
     def merge(self):
         '''
@@ -321,10 +322,10 @@ class QFT:
         self.zip_up(max_bond=max_bond_dim, cutoff=cutoff, verbose=verbose)
         
         # Do final global compression
-        self.tn.compress_all(inplace=True, max_bond=max_bond_dim)
+        # self.tn.compress_all(inplace=True, max_bond=max_bond_dim)
         
         if verbose:
-            self.draw()
+            self.draw("Finished Zip Up")
         
         # Get the tensors in the correct order
         sorted_tensors = self.get_sorted_tensors()
@@ -415,9 +416,11 @@ class QFT:
         '''
         
         end_row = 1
-        col_radius = 3
+        end_col = 2*self.N-3
         
-        for col in range(1, 2*self.N-3, 2):
+        col_radius = 2.5
+        
+        for col in range(1, end_col, 2):
             # Do zip up
             for row in range(self.N-1, end_row, -1):
                 contracted_tensor, contracted_tensor_tag = self.contract_tensors_in_range([row, row+0.5], [col-col_radius, col+col_radius])
@@ -599,12 +602,28 @@ class QFT:
             last_contracted_tensor.add_tag(last_tags)
            
             if verbose: 
-                self.draw() 
+                self.draw("Zip Down Finished")
+                
+            # Lastly, shift the tags of our other tensors over to the left
+            row_range = (0, self.N-1)
+            col_range = (col, self.N**2)
+            tensors_to_shift = self.getValidTensorsInRange(row_range, col_range)
+            shift_retag_map = {}
+            for t in tensors_to_shift:
+                tensor_row, tensor_col = TensorHelpers.getTensorRowCol(t)
+                tensor_tag = TensorHelpers.getRowColTagFromTensor(t)
+                shift_retag_map[tensor_tag] = TensorHelpers.getTag(tensor_row, tensor_col-1)
+            # Apply retagging 
+            self.tn.retag(shift_retag_map, inplace=True)
+            
+            if verbose: 
+                self.draw("Shifted Over")
+            
             
             # Increment our ending row before starting a new column
             end_row += 1
     
-    def draw(self):
+    def draw(self, title=""):
         fix_dict = {}
 
         # # Layout the tensor network in a grid
@@ -612,7 +631,16 @@ class QFT:
             for j in np.arange(0, self.N*self.N, 0.5):
                 fix_dict[f'({i:.1f}, {j:.1f})'] = (j, -i)
 
-        self.tn.draw(color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], figsize=(16, 16), show_inds='all', show_tags=True, initial_layout='shell', fix=fix_dict, font_size=10)
+        self.tn.draw(
+            color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], 
+            figsize=(16, 16),
+            show_inds='all',
+            show_tags=True,
+            initial_layout='shell',
+            fix=fix_dict,
+            font_size=10,
+            title=title
+        )
 
     def print_tensors(self):
         '''
