@@ -38,7 +38,7 @@ class MPS:
         mps_list = []
         for f in fs:
             input = np.arange(start, stop, step=1/(2**self.N))
-            state = f(input)[::-1]
+            state = f(input)
             
             cur_mps = qtn.MatrixProductState.from_dense(state, dims=[2]*self.N, method='svd', max_bond=max_bond, cutoff=cutoff, absorb='right')
             mps_list.append(cur_mps)

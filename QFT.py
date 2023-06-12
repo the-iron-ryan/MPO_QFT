@@ -186,8 +186,15 @@ class QFT:
         #   [0, 0], [0, 1] 
         # ]
         # (MPO-QFT paper equation 53)
+        copy_tensor_data = np.array([ 
+             [[0.7071067811865475, 0], 
+              [0.7071067811865475, 0]], 
+             
+             [[0, 0.7071067811865475], 
+              [0, -0.7071067811865475]] 
+        ])
         copy_tensor = qtn.Tensor(
-            data=np.array([ [[1, 0], [0,0]], [[0, 0], [0, 1]] ]), 
+            data=copy_tensor_data, 
             inds = self.getIndices(start_row, col, bonds=[
                 (start_row, col-1), 
                 (start_row, col+1),
@@ -293,7 +300,7 @@ class QFT:
         row = 0
         col = 0
         while row < self.N-1 and col < 2*self.N-1:
-            self.add_hadamard(row, col)
+            # self.add_hadamard(row, col)
             self.add_phase_MPO(row, self.N, col+1)
 
             row += 1
@@ -303,7 +310,7 @@ class QFT:
         # Important: merge all unconnected phase gates after we've built the circuit
         self.merge()
 
-    def create_MPO(self, max_bond_dim=-1, cutoff=1e-15, verbose=False):
+    def create_MPO(self, max_bond_dim=-1, cutoff=1e-15, verbose=False, reverse=False):
         '''
         Creates a matrix product operator representing the quantum Fourier transform
         
@@ -322,7 +329,7 @@ class QFT:
         self.zip_up(max_bond=max_bond_dim, cutoff=cutoff, verbose=verbose)
         
         # Do final global compression
-        # self.tn.compress_all(inplace=True, max_bond=max_bond_dim)
+        self.tn.compress_all(inplace=True, max_bond=max_bond_dim)
         
         if verbose:
             self.draw("Finished Zip Up")
@@ -336,8 +343,19 @@ class QFT:
         
         # Convert the tensors to numpy arrays 
         MPO_arrays = [t.data for t in sorted_tensors]
-        
+       
         mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr')
+        
+        if reverse:
+            mpo_tags = list(mpo.tag_map.keys())
+            reversed_mpo_tags = list(reversed(mpo_tags))
+            reverse_tag_map = { mpo_tags[i]: reversed_mpo_tags[i] for i in range(len(reversed_mpo_tags))}
+            mpo.retag(reverse_tag_map, inplace=True)
+
+            reversed_b_ind_map = { f'b{i}': f'b{self.N-1-i}' for i in range(self.N)}
+            mpo.reindex(reversed_b_ind_map, inplace=True)
+            reversed_k_ind_map = { f'k{i}': f'k{self.N-1-i}' for i in range(self.N)}
+            mpo.reindex(reversed_k_ind_map, inplace=True)
 
         if verbose:
             mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds='bond-size', show_tags=True, figsize=(20, 20))
