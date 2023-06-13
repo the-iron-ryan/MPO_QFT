@@ -407,12 +407,6 @@ class QFT:
             reversed_k_ind_map = { f'k{i}': f'k{self.N-1-i}' for i in range(self.N)}
             mpo.reindex(reversed_k_ind_map, inplace=True)
 
-            # mpo.flip(inds=)
-            
-            
-            # reversed_z_ind_map = { f'z{i}': f'z{self.N-1-i}' for i in range(self.N)}
-            # mpo.reindex(reversed_z_ind_map, inplace=True)
-
         if verbose:
             mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds='bond-size', show_tags=True, figsize=(20, 20))
 
