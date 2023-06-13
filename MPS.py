@@ -34,13 +34,18 @@ class MPS:
     cutoff: float
         cutoff SVD value for MPS compression
     '''
-    def create_MPS(self, fs, start, stop, max_bond=-1, cutoff=1e-10):
+    def create_MPS(self, fs, start, stop, max_bond=-1, cutoff=1e-10, reverse=False):
         mps_list = []
         for f in fs:
             input = np.arange(start, stop, step=1/(2**self.N))
             state = f(input)
             
             cur_mps = qtn.MatrixProductState.from_dense(state, dims=[2]*self.N, method='svd', max_bond=max_bond, cutoff=cutoff, absorb='right')
+            
+            if reverse:
+                cur_mps.flip(inplace=True)
+            
+            
             mps_list.append(cur_mps)
           
         final_mps = mps_list[0] 

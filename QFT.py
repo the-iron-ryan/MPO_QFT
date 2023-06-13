@@ -161,10 +161,15 @@ class QFT:
             The column of the tensor within the quantum circuit.
             Column 0 is the leftmost column.
         """
-
-        inds = self.getIndices(row, col, bonds=[(row, col-1), (row, col+1)])
-        self.tn.add(qtn.Tensor(qu.hadamard(), inds=inds, tags=['H', TensorHelpers.getTag(row, col)]))
-
+        return self.tn.add(self.get_hadamard(row, col))
+        
+    def get_hadamard(self, row, col):
+        inds = self.getIndices(row, col, bonds=[
+            (row, col-1), 
+            (row, col+1)
+        ])
+        return qtn.Tensor(qu.hadamard(), inds=inds, tags=['H', TensorHelpers.getTag(row, col)])
+        
 
     def add_phase_MPO(self, start_row, end_row, col):
         '''
@@ -175,10 +180,32 @@ class QFT:
         start_row : int
             the starting row of the phase MPO
         '''
+        for t in self.get_phase_MPO(start_row, end_row, col):
+            self.tn.add(t)
+
+    def get_phase_MPO(self, start_row, end_row, col):
+        '''
+        Returns the tensors for an MPO representing the controlled phase gates
+
+        Parameters
+        ----------
+        start_row : int
+            the starting row of the phase MPO
+        '''
+
+        tensors = []
+        
+        # Case where we have a single site. Only return a hadamard
+        if start_row == end_row:
+            tensors.append(self.add_hadamard(start_row, col))
+            return
         
         # Internal function to get the data for a order 4 phase gate
         def get_cphase_data(phase):
-            return np.array([qu.identity(2), np.zeros((2,2)), np.zeros((2,2)), qu.phase_gate(phase)]).reshape(2,2,2,2) 
+            return np.array([
+                [ qu.identity(2), np.zeros((2,2))],
+                [ np.zeros((2,2)), qu.phase_gate(phase)]
+            ])
 
         # Define our control (copy tensor) in the form:
         # [ 
@@ -187,22 +214,22 @@ class QFT:
         # ]
         # (MPO-QFT paper equation 53)
         copy_tensor_data = np.array([ 
-             [[0.7071067811865475, 0], 
-              [0.7071067811865475, 0]], 
+             [[1, 0], 
+              [0, 0]],
              
-             [[0, 0.7071067811865475], 
-              [0, -0.7071067811865475]] 
+             [[0, 0], 
+              [0, 1]]
         ])
         copy_tensor = qtn.Tensor(
             data=copy_tensor_data, 
             inds = self.getIndices(start_row, col, bonds=[
-                (start_row, col-1), 
-                (start_row, col+1),
-                (start_row+1, col)
+                (start_row+1, col), # control bond
+                (start_row, col-1), # left row vector bond
+                (start_row, col+1), # right col vector bond
             ]),
             tags = ['C', TensorHelpers.getTag(start_row, col)])
 
-        self.tn.add(copy_tensor)
+        tensors.append(copy_tensor)
         
         # Apply each of our controlled phase gates in the form:
         # [
@@ -217,13 +244,13 @@ class QFT:
             phase_denom = (2**(phase_count))
             phase = -np.pi/phase_denom
             inds = self.getIndices(i, col, bonds=[
-                (i, col-1), 
-                (i, col+1),
-                (i-1, col), 
-                (i+1, col)
+                (i-1, col), # top control bond (row)
+                (i+1, col), # bottom control bond (col)
+                (i, col-1), # left row vector bond
+                (i, col+1), # right col vector bond
             ])
 
-            self.tn.add(qtn.Tensor(
+            tensors.append(qtn.Tensor(
                 data=get_cphase_data(phase),
                 inds=inds,
                 tags=['P', f'$\pi$/{phase_denom}', TensorHelpers.getTag(i,col)]))
@@ -241,16 +268,16 @@ class QFT:
         last_phase_denom = (2**(phase_count))
         last_phase = -np.pi/last_phase_denom
         last_phase_gate_inds = self.getIndices(end_row-1, col, bonds=[
-            (end_row-1, col-1), 
-            (end_row-1, col+1), 
-            (end_row-2, col)
+            (end_row-2, col),
+            (end_row-1, col-1),
+            (end_row-1, col+1)
         ])
 
-        self.tn.add(qtn.Tensor(
+        tensors.append(qtn.Tensor(
             data=np.array([qu.identity(2), qu.phase_gate(last_phase)]).reshape(2,2,2),
             inds=last_phase_gate_inds,
             tags=['P', f'$\pi$/{last_phase_denom}', TensorHelpers.getTag(end_row-1, col)]))
-        
+        return tensors
     def merge(self):
         '''
         Merges all unconnected indices of phase gates in our tensor network
@@ -300,7 +327,7 @@ class QFT:
         row = 0
         col = 0
         while row < self.N-1 and col < 2*self.N-1:
-            # self.add_hadamard(row, col)
+            self.add_hadamard(row, col)
             self.add_phase_MPO(row, self.N, col+1)
 
             row += 1
@@ -309,6 +336,27 @@ class QFT:
 
         # Important: merge all unconnected phase gates after we've built the circuit
         self.merge()
+        
+    def create_circuit_from_apply(self, max_bond_dim=-1, cutoff=1e-15, verbose=False, reverse=False):
+        row = 0
+        col = 0
+        while row < self.N-1 and col < 2*self.N-1:
+            # self.add_hadamard(row, col)
+            phase_mpo_tensors = self.get_phase_MPO(row, self.N, col)
+            phase_mpo_data = list(map(lambda t: t.data, phase_mpo_tensors))
+            
+            phase_mpo = qtn.MatrixProductOperator(phase_mpo_data)
+            phase_mpo.compress_all(inplace=True, max_bond=max_bond_dim, cutoff=cutoff)
+
+            row += 1
+            col += 1
+            
+        
+        # self.add_hadamard(row, col)
+
+        # Important: merge all unconnected phase gates after we've built the circuit
+        self.merge()
+        
 
     def create_MPO(self, max_bond_dim=-1, cutoff=1e-15, verbose=False, reverse=False):
         '''
@@ -344,18 +392,26 @@ class QFT:
         # Convert the tensors to numpy arrays 
         MPO_arrays = [t.data for t in sorted_tensors]
        
-        mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr')
+        mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr', bond_name='z')
+        mpo.right_canonize()
         
         if reverse:
             mpo_tags = list(mpo.tag_map.keys())
             reversed_mpo_tags = list(reversed(mpo_tags))
             reverse_tag_map = { mpo_tags[i]: reversed_mpo_tags[i] for i in range(len(reversed_mpo_tags))}
+            
             mpo.retag(reverse_tag_map, inplace=True)
 
             reversed_b_ind_map = { f'b{i}': f'b{self.N-1-i}' for i in range(self.N)}
             mpo.reindex(reversed_b_ind_map, inplace=True)
             reversed_k_ind_map = { f'k{i}': f'k{self.N-1-i}' for i in range(self.N)}
             mpo.reindex(reversed_k_ind_map, inplace=True)
+
+            # mpo.flip(inds=)
+            
+            
+            # reversed_z_ind_map = { f'z{i}': f'z{self.N-1-i}' for i in range(self.N)}
+            # mpo.reindex(reversed_z_ind_map, inplace=True)
 
         if verbose:
             mpo.draw(color=['Q', 'P', 'C', 'H'], show_inds='bond-size', show_tags=True, figsize=(20, 20))
