@@ -100,12 +100,13 @@ class QFT:
         Gets a list of all tensors sorted by row and col
         '''
         
-        # MPO_tensors = self.tn.tensors
-        # sorted_tensors = sorted(MPO_tensors, key=lambda t: TensorHelpers.getRowColTagFromTensor(t))
-        sorted_tensors = self.tn.tensors_sorted()
-        for t in sorted_tensors:
-            t.modify(inds=t.inds[::-1])
-        return sorted_tensors
+        # Sort by row and col in tuple form
+        def sort_func(t):
+            row, col = TensorHelpers.getTensorRowCol(t)
+            return (row, col)
+        
+        MPO_tensors = self.tn.tensors
+        return sorted(MPO_tensors, key=sort_func)
         
 
     def getIndices(self, tensor_row, tensor_col, bonds=[]):
@@ -393,7 +394,7 @@ class QFT:
         MPO_arrays = [t.data for t in sorted_tensors]
        
         mpo = qtn.MatrixProductOperator(MPO_arrays, shape='udlr', bond_name='z')
-        mpo.right_canonize()
+        # mpo.right_canonize()
         
         if reverse:
             mpo_tags = list(mpo.tag_map.keys())
@@ -486,22 +487,29 @@ class QFT:
         end_row = 1
         end_col = 2*self.N-3
         
+        col = 1
         col_radius = 2.5
-        
-        for col in range(1, end_col, 2):
+       
+        while True: 
             # Do zip up
             for row in range(self.N-1, end_row, -1):
                 contracted_tensor, contracted_tensor_tag = self.contract_tensors_in_range([row, row+0.5], [col-col_radius, col+col_radius])
                
+                # Shift the tag of the contracted tensor up by 0.5 
+                contracted_tag_row, contracted_tag_col = TensorHelpers.getTagRowCol(contracted_tensor_tag)
+                new_contracted_tensor_tag = TensorHelpers.getTag(contracted_tag_row, contracted_tag_col - 0.5)
+                contracted_tensor.retag({contracted_tensor_tag: new_contracted_tensor_tag}, inplace=True)
+                contracted_tensor_tag = new_contracted_tensor_tag
+               
                 if verbose: 
-                    self.draw() 
+                    self.draw(f"Zipping up: {row}, {col}") 
                 
                 # Get the indices we're going to SVD on
                 left_inds = [str(index) for index in self.getSVDIndices(contracted_tensor, row, 'up')]
                 right_inds = list(filter(lambda t: t not in left_inds, TensorHelpers.getTensorIndices(contracted_tensor)))
                 
                 absorb = "left"
-                left_tags = [TensorHelpers.getTag(row-0.5, col+1), f'UxS[{row}]']
+                left_tags = [TensorHelpers.getTag(row-0.5, col+1), f'UxS[{row}]', 'T']
                 right_tags = [TensorHelpers.getTag(row, col+1), f'V[{row}]']
                 
                 self.tn.replace_with_svd(
@@ -528,7 +536,7 @@ class QFT:
                 right_val_tensor.drop_tags(right_tags_to_drop)
                
                 if verbose:
-                    self.draw() 
+                    self.draw(f"Zipping up: {row}, {col}") 
                 
                
             # Contract the row with the center of orthogonality  
@@ -537,14 +545,14 @@ class QFT:
             # Contract our tensors and fetch the tensor plus its index tag
             center_ortho_contracted_tensor, center_ortho_contracted_tensor_tag = self.contract_tensors_in_range([center_ortho_row, center_ortho_row + 0.5], [col-col_radius, col+col_radius])
             
-            tags = [TensorHelpers.getTag(center_ortho_row, col+1), f'T[{center_ortho_row}]']
+            tags = [TensorHelpers.getTag(center_ortho_row, col+1), 'T']
             
             # Drop all other tags and add our new tags
             center_ortho_contracted_tensor.drop_tags()
             center_ortho_contracted_tensor.add_tag(tags)
             
             if verbose:
-                self.draw()
+                self.draw("Contracting top row tensor")
             
             # contract the final tensor
             last_row = end_row-1
@@ -556,9 +564,11 @@ class QFT:
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(tags)
             
-           
+            # Be sure that the last contracted tensor shifts to the 
+            self.shift_tensors_columns_in_range([0, last_row], [0, col], col, 1)
             if verbose: 
-                self.draw()
+                self.draw("Zip up Finished")
+
             
 
             # Base case: return if we have a complte MPO
@@ -578,33 +588,36 @@ class QFT:
                 # Get the tensors in the correct order
                 sorted_tensors = self.get_sorted_tensors()
                 
-                # Print out the tensors 
-                for t in sorted_tensors:
-                    print(f"Tensor shape: {t.shape}")
-                    print(f"Tensor: {t}")
-                    print(f"Tensor Data:\n {t.data}")
-                
                 # Reindex the index between these two tensors to have a specifc bond name
                 reindex_map = {}
                 sorted_tensors = self.get_sorted_tensors()
                 for i in range(self.N - 1):
                     shared_inds = TensorHelpers.getSharedIndicesBetween(sorted_tensors[i], sorted_tensors[i+1])
-                    reindex_map[shared_inds[0]] = f'z{i}'
+                    reindex_map[shared_inds[0]] = f'z{i:03}'
                     
                 self.tn.reindex(reindex_map, inplace=True)
                 
                 
                 # Reindex the upper and lower indices of the tensors
+                def get_lower_index(t):
+                    # Sort through all indices and find the ones that are not bonds
+                    inds = [Index(i) for i in t.inds if Index.isValid(i)]
+                    return str(sorted(inds, key=lambda i: i.get_smallest_col())[-1])
+
+                def get_upper_index(t):
+                    inds = [Index(i) for i in t.inds if Index.isValid(i)]
+                    return str(sorted(inds, key=lambda i: i.get_smallest_col())[0])
+
+                
                 reindex_map = {}
                 for i in range(self.N):
                     t = sorted_tensors[i]
-                    sorted_inds = sorted(t.inds)
                     
-                    upper_index = sorted_inds[0]
-                    lower_index = sorted_inds[1]
+                    upper_index = get_upper_index(t)
+                    lower_index = get_lower_index(t)
                     
-                    reindex_map[upper_index] = f'k{i}'
-                    reindex_map[lower_index] = f'b{i}'
+                    reindex_map[upper_index] = f'k{i:03}'
+                    reindex_map[lower_index] = f'b{i:03}'
                     
                 self.tn.reindex(reindex_map, inplace=True)
                     
@@ -625,14 +638,14 @@ class QFT:
                 cur_tensor, cur_tensor_tag = self.contract_tensors_in_range([row-0.5, row], [col-col_radius, col+col_radius])
                 
                 if verbose:
-                    self.draw()
+                    self.draw(f"Zip Down row {row}, col {col}")
                 
                 # Get the indices we're going to SVD on
                 right_inds = [str(index) for index in self.getSVDIndices(cur_tensor, row, 'down')]
                 left_inds = list(filter(lambda t: t not in right_inds,TensorHelpers.getTensorIndices(cur_tensor)))
                 
                 absorb = "right"
-                right_tags = [f'VxS[{row}]', TensorHelpers.getTag(row+0.5, col+1)]
+                right_tags = [f'VxS[{row}]', TensorHelpers.getTag(row+0.5, col+1), 'T']
                 left_tags = [f'U[{row}]', TensorHelpers.getTag(row, col+1)]
                 
                 self.tn.replace_with_svd(
@@ -659,37 +672,46 @@ class QFT:
                 right_val_tensor.drop_tags(right_tags_to_drop)
                 
                 if verbose:
-                    self.draw()
+                    self.draw(f"Zip Down row {row}, col {col}")
 
             # Do last contraction operation
             last_row = self.N-1
             last_contracted_tensor, last_contracted_tensor_tag = self.contract_tensors_in_range([last_row-0.5, last_row], [col-col_radius, col+col_radius])
             
-            last_tags = [TensorHelpers.getTag(last_row, col+1), f'T[{last_row}]']
+            last_tags = [TensorHelpers.getTag(last_row, col+1), 'T']
             last_contracted_tensor.drop_tags()
             last_contracted_tensor.add_tag(last_tags)
            
             if verbose: 
                 self.draw("Zip Down Finished")
                 
-            # Lastly, shift the tags of our other tensors over to the left
-            row_range = (0, self.N-1)
-            col_range = (col, self.N**2)
-            tensors_to_shift = self.getValidTensorsInRange(row_range, col_range)
-            shift_retag_map = {}
-            for t in tensors_to_shift:
-                tensor_row, tensor_col = TensorHelpers.getTensorRowCol(t)
-                tensor_tag = TensorHelpers.getRowColTagFromTensor(t)
-                shift_retag_map[tensor_tag] = TensorHelpers.getTag(tensor_row, tensor_col-1)
-            # Apply retagging 
-            self.tn.retag(shift_retag_map, inplace=True)
+            # Lastly, shift the tags of our current tensors over by 2
+            row_range = (0, self.N)
+            col_range = (0, col+1)
+            self.shift_tensors_columns_in_range(row_range, col_range, col, 2)
             
             if verbose: 
                 self.draw("Shifted Over")
             
+            # Increment our current column over by 2
+            col += 2
             
             # Increment our ending row before starting a new column
             end_row += 1
+            
+    def shift_tensors_columns_in_range(self, row_range, col_range, target_col, shift_amount):
+        '''
+        Shifts the corresponding tensors in a given range over by a certain amount
+        '''
+        tensors_to_shift = self.getValidTensorsInRange(row_range, col_range)
+        shift_retag_map = {}
+        for t in tensors_to_shift:
+            tensor_row, tensor_col = TensorHelpers.getTensorRowCol(t)
+            tensor_tag = TensorHelpers.getRowColTagFromTensor(t)
+            shift_retag_map[tensor_tag] = TensorHelpers.getTag(tensor_row, target_col+shift_amount)
+        # Apply retagging 
+        self.tn.retag(shift_retag_map, inplace=True)
+        
     
     def draw(self, title=""):
         fix_dict = {}
@@ -700,7 +722,7 @@ class QFT:
                 fix_dict[f'({i:.1f}, {j:.1f})'] = (j, -i)
 
         self.tn.draw(
-            color=['P','H', 'C', 'V', 'T[3]', 'T[1]'], 
+            color=['P','H', 'C', 'T'], 
             figsize=(16, 16),
             show_inds='all',
             show_tags=True,

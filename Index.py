@@ -1,4 +1,6 @@
 import re
+import ast
+from typing import Any
 
 '''
 Basic Index Class
@@ -8,9 +10,10 @@ class Index:
 
         # When given a single argument, assume its a connected tag
         if len(args) == 1:
-            self.nodes = sorted(self._parse_tag(args[0]))
+            parsed_str_values = self._parse_tag(args[0])
+            self.nodes = sorted([ast.literal_eval(s_val) for s_val in parsed_str_values])
         elif len(args) == 2:
-            self.nodes = sorted([args[0], args[1]])
+            self.nodes = sorted([ast.literal_eval(args[0]), ast.literal_eval(args[1])])
 
     def _parse_tag(self, tag: str):
         # Match between parenthesis
@@ -46,3 +49,19 @@ class Index:
 
     def __str__(self) -> str:
         return f'{self.nodes[0]}<->{self.nodes[1]}'
+    
+    def get_smallest_row(self):
+        return min(self.nodes, key=lambda node: node[0])
+    def get_largest_row(self):
+        return max(self.nodes, key=lambda node: node[0])
+    def get_smallest_col(self):
+        return min(self.nodes, key=lambda node: node[1])
+    def get_largest_col(self):
+        return max(self.nodes, key=lambda node: node[1])
+   
+    @classmethod 
+    def isValid(cls, tag: str):
+        '''
+        Helper class method to check if a tag is valid
+        '''
+        return len(re.findall(r'\(.+?\)', tag)) == 2
