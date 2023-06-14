@@ -723,13 +723,22 @@ class QFT:
 
         self.tn.draw(
             color=['P','H', 'C', 'T'], 
-            figsize=(16, 16),
-            show_inds='all',
+            figsize=(12, 12),
+            margin=0.05,
+            show_inds='bond-size',
             show_tags=True,
             initial_layout='shell',
             fix=fix_dict,
             font_size=10,
-            title=title
+            title=title,
+            edge_color='black',
+            edge_alpha=1.0,
+            edge_scale=1.0,
+            arrow_linewidth=1.0,
+            arrow_overhang=0.0,
+            node_size=400,
+            node_outline_darkness=0.0,
+            node_outline_size=2.5
         )
 
     def print_tensors(self):
