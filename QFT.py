@@ -342,7 +342,6 @@ class QFT:
         row = 0
         col = 0
         while row < self.N-1 and col < 2*self.N-1:
-            # self.add_hadamard(row, col)
             phase_mpo_tensors = self.get_phase_MPO(row, self.N, col)
             phase_mpo_data = list(map(lambda t: t.data, phase_mpo_tensors))
             
@@ -353,7 +352,6 @@ class QFT:
             col += 1
             
         
-        # self.add_hadamard(row, col)
 
         # Important: merge all unconnected phase gates after we've built the circuit
         self.merge()
